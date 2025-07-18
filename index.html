@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Multi-Phase Countdown</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: url('/static/bg.png') center center no-repeat;
+      background-size: cover;
+      background-attachment: fixed;
+      font-family: 'Orbitron', sans-serif;
+      color: #00ffea;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .center-container {
+      background: rgba(0, 0, 0, 0.6);
+      padding: 40px;
+      border-radius: 12px;
+      text-align: center;
+      width: 90%; max-width: 800px;
+    }
+    .row { margin: 12px 0; }
+
+    #turnCount { font-size: 4em; font-weight: bold; }
+    #turnTimer { font-size: 7em; font-weight: bold; transition: color 0.4s ease; }
+    #phaseTimer { font-size: 4em; font-weight: bold; transition: color 0.4s ease; }
+    #currentPhase { font-size: 3em; font-weight: 600; margin-top: 10px; }
+    #nextPhase { font-size: 2em; margin-top: 5px; }
+    #settings-1 { font-size: 2em; margin-top: 5px; }
+    .pulse { animation: pulseRed 1s infinite; }
+    .pulse-pause { animation: pulseBlue 1s infinite; }
+    .alert { animation: pulseYellow 1s infinite; }
+    .alert-orange { animation: pulseOrange 1.5s infinite; }
+
+    @keyframes pulseRed {
+      0%,100% { color: #ff4444; }
+      50% { color: #aa0000; }
+    }
+    @keyframes pulseYellow {
+      0%,100% { color: #ffff66; }
+      50% { color: #cccc33; }
+    }
+    @keyframes pulseBlue {
+      0%,100% { color: #66ccff; }
+      50% { color: #3399cc; }
+    }
+    @keyframes pulseOrange {
+      0%,100% { color: #ffae42; }
+      50% { color: #cc8a33; }
+    }
+
+    .phase-change, .phase-scroll {
+      animation: slideIn 1s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-30%); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    #controls { margin-top: 30px; }
+    #controls button, #controls label {
+      font-size: 2.3em;
+      padding: 8px 16px;
+      margin: 0 8px;
+      border: none;
+      border-radius: 6px;
+      background: rgba(128,128,128,1);
+      color: #00ffea;
+      cursor: pointer;
+    }
+    #controls input { transform: scale(1.2); margin-right: 6px; }
+    #controls button:hover { background: rgba(255,255,255,0.2); }
+  </style>
+</head>
+<body>
+  <div class="center-container">
+    <div class="row" id="turnCount">Turn: {{ start_turn }}</div>
+    <div class="row" id="turnTimer">00:00</div>
+    <div class="row" id="phaseTimer">00:00</div>
+    <div class="row phase-change" id="currentPhase">Phase: –</div>
+    <div class="row" id="nextPhase">Next: –</div>
+    <div class="row" id="controls">
+      <button id="startBtn">Start</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+    <div class="row" id="settings-1">
+      <label><input type="checkbox" id="pauseOption"> Pause at end of turn</label>
+      <label><input type="checkbox" id="muteOption">  Mute audio</label>
+    </div>
+  </div>
+
+
+  <!-- Audio cue for phase change -->
+  <audio id="phaseDing" src="/static/phase-ding.mp3"></audio>
+
+
+  <script>
+      let phases = [];
+    let initialTime = 0;
+    let startTurn = 1;
+    let timeLeft = 0;
+    let timerID = null;
+    let paused = true;
+    let turnCount = 1;
+    let lastPhaseIndex = -1;
+    let resetConfirm = false;
+    let lastPhaseAlert = null;
+    let audioReady = false;
+
+    const turnEl    = document.getElementById('turnTimer');
+    const phaseTimeEl = document.getElementById('phaseTimer');
+    const phaseEl   = document.getElementById('currentPhase');
+    const nextEl    = document.getElementById('nextPhase');
+    const countEl   = document.getElementById('turnCount');
+    const startBtn  = document.getElementById('startBtn');
+    const pauseBtn  = document.getElementById('pauseBtn');
+    const resetBtn  = document.getElementById('resetBtn');
+    const pauseOpt  = document.getElementById('pauseOption');
+    const ding      = document.getElementById('phaseDing');
+    const muteOpt  = document.getElementById('muteOption');
+
+    function pad(n,w=2){return n.toString().padStart(w,'0');}
+    function formatHMS(sec){const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=sec%60; return `${pad(h)}:${pad(m)}:${pad(s)}`; }
+    function formatMS(sec){const m=Math.floor(sec/60), s=sec%60; return `${pad(m)}:${pad(s)}`; }
+
+    function updateDisplay(){
+      turnEl.textContent = formatMS(timeLeft);
+      countEl.textContent = `Turn: ${turnCount}`;
+
+      const elapsed = initialTime - timeLeft;
+      let cum=0, idx=phases.length-1, phaseElapsed=0;
+      for(let i=0;i<phases.length;i++){
+        if(elapsed<cum+phases[i].duration){ idx=i; phaseElapsed=elapsed-cum; break; }
+        cum+=phases[i].duration;
+      }
+      const current=phases[idx];
+      const nextName = idx<phases.length-1 ? phases[idx+1].name : 'None';
+      const leftPhase = current.duration - phaseElapsed;
+
+      if (idx !== lastPhaseIndex) {
+        phaseEl.classList.add('phase-change');
+        phaseTimeEl.classList.add('phase-scroll');
+        if (audioReady && ding && !muteOpt?.checked) {
+          ding.currentTime = 0;
+          ding.play();
+        }
+        setTimeout(() => {
+          phaseEl.classList.remove('phase-change');
+          phaseTimeEl.classList.remove('phase-scroll');
+        }, 1000);
+        lastPhaseIndex = idx;
+      }
+
+      phaseEl.textContent = `Phase: ${current.name}`;
+      nextEl.textContent = `Next: ${nextName}`;
+      phaseTimeEl.textContent = formatMS(leftPhase);
+
+      phaseTimeEl.classList.remove('alert','pulse','alert-orange');
+      if(leftPhase<=5) phaseTimeEl.classList.add('pulse');
+      else if(leftPhase<30) phaseTimeEl.classList.add('alert');
+      else if(leftPhase<60) phaseTimeEl.classList.add('alert-orange');
+
+      turnEl.classList.remove('alert','pulse','pulse-pause','alert-orange');
+      if(timeLeft<=5) turnEl.classList.add('pulse');
+      else if(timeLeft<30) turnEl.classList.add('alert');
+      else if(timeLeft<60) turnEl.classList.add('alert-orange');
+      if(paused && timeLeft>0) turnEl.classList.add('pulse-pause');
+
+      audioReady = true;
+    }
+
+    function tick(){
+      if(!paused){
+        timeLeft--;
+        if (timeLeft < 0) {
+          turnCount++;
+          timeLeft = initialTime;
+          if (pauseOpt.checked) {
+            paused = true;
+          }
+        }
+        updateDisplay();
+      }
+    }
+
+    startBtn.onclick = () => {
+      if (!timerID) timerID = setInterval(tick, 1000);
+      paused = false;
+      updateDisplay();
+    };
+    pauseBtn.onclick = () => { paused=true; updateDisplay(); };
+    resetBtn.onclick = () => {
+      if(!resetConfirm){ resetBtn.textContent='Confirm Reset'; resetConfirm=true;
+        setTimeout(()=>{ resetBtn.textContent='Reset'; resetConfirm=false; },3000);
+      } else {
+        clearInterval(timerID); timerID=null; paused=true;
+        timeLeft=initialTime; turnCount=startTurn; resetConfirm=false; resetBtn.textContent='Reset'; updateDisplay();
+      }
+    };
+
+    fetch('config.json')
+      .then(res => res.json())
+      .then(cfg => {
+        phases = cfg.phases;
+        startTurn = cfg.start_turn || 1;
+        turnCount = startTurn;
+        initialTime = phases.reduce((sum, p) => sum + p.duration, 0);
+        timeLeft = initialTime;
+        updateDisplay();
+    });
+  </script>
+</body>
+</html>
