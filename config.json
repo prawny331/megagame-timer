@@ -1,0 +1,9 @@
+{
+  "start_turn": 1,
+  "phases": [
+    { "name": "Planning", "duration": 60 },
+    { "name": "Commitment", "duration": 30 },
+    { "name": "Action", "duration": 60 },
+    { "name": "Admin", "duration": 60 }
+  ]
+}
