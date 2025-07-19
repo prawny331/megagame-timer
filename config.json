@@ -1,5 +1,5 @@
 {
-  "start_turn": 1,
+  "start_turn": 5,
   "phases": [
     { "name": "Planning", "duration": 600 },
     { "name": "Commitment", "duration": 120 },
